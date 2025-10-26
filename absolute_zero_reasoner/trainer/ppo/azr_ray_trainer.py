@@ -918,19 +918,16 @@ class CodeIORayPPOTrainer(ReasonRLRayPPOTrainer):
                 # get avg_program lines
                 avg_program_lines = sum(len(program['snippet'].split('\n')) for program in valid_programs) / len(valid_programs) if valid_programs else 0
                 train_metrics[f'{problem_type}/avg_program_lines'] = avg_program_lines
-            # After computing rewards, store them in DatasetManager
-            if valid_programs:
-                # Extract proposer rewards (rewards of the problems that generated these programs)
-                proposer_rewards = []
-                for program in valid_programs:
-                    # Get the reward of the original problem that generated this program
-                    proposer_reward = program.get('proposer_reward', 0.0)  # Default to 0 if not available
-                    proposer_rewards.append(proposer_reward)
-                
-                # Store rewards in DatasetManager
-                ray.get(self.dataset_manager.add_reward_batch.remote(
-                    dataset_key, proposer_rewards, self.global_steps
-                ))
+            # Determine dataset_key based on problem_type
+            if problem_type.endswith('code_i'):
+                dataset_key = 'input' 
+            elif problem_type.endswith('code_o'):
+                dataset_key = 'output'
+            elif problem_type.endswith('code_e'):
+                dataset_key = 'error'
+            elif problem_type.endswith('code_f'):
+                dataset_key = 'problem'
+            
             # Log new programs if available
             if valid_programs and self.config.azr.random_print_max_programs > 0:
                 PrettyPrinter.section_header(f"New {problem_type} Programs")
@@ -1009,16 +1006,6 @@ class CodeIORayPPOTrainer(ReasonRLRayPPOTrainer):
             train_metrics = {f'{problem_type}/{k}': np.mean(v) for k, v in train_metrics.items()}
             # log the number of valid programs added to the dataset
             if problem_type.startswith('gen'):
-                if problem_type.endswith('code_i'):
-                    dataset_key = 'input' 
-                elif problem_type.endswith('code_o'):
-                    dataset_key = 'output'
-                elif problem_type.endswith('code_e'):
-                    dataset_key = 'error'
-                elif problem_type.endswith('code_f'):
-                    dataset_key = 'problem'
-                else:
-                    raise ValueError(f'Invalid problem type: {problem_type}')
                 train_metrics[f'{problem_type}/num_valid_programs'] = ray.get(
                     self.dataset_manager.get_recent_additions.remote(
                         dataset_key, self.global_steps, self._past_epoch_window
@@ -1026,6 +1013,20 @@ class CodeIORayPPOTrainer(ReasonRLRayPPOTrainer):
                 )
             metrics.update(train_metrics)
             batch.batch['token_level_scores'] = reward_tensor
+            
+            # After computing rewards, store them in DatasetManager
+            if valid_programs:
+                # Extract proposer rewards (rewards of the problems that generated these programs)
+                proposer_rewards = []
+                for program in valid_programs:
+                    # Get the reward of the original problem that generated this program
+                    proposer_reward = program.get('proposer_reward', 0.0)  # Default to 0 if not available
+                    proposer_rewards.append(proposer_reward)
+                
+                # Store rewards in DatasetManager
+                ray.get(self.dataset_manager.add_reward_batch.remote(
+                    dataset_key, proposer_rewards, self.global_steps
+                ))
 
             if not self.config.actor_rollout_ref.actor.get('use_kl_loss', False):
                 batch, kl_metrics = apply_kl_penalty(batch,
