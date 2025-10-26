@@ -258,6 +258,10 @@ class DatasetManager:
             'output_steps_counter': defaultdict(int),
             'error_steps_counter': defaultdict(int),
             'problem_steps_counter': defaultdict(int),
+            'input_rewards': [],     # Store proposer rewards for input problems
+            'output_rewards': [],    # Store proposer rewards for output problems
+            'error_rewards': [],     # Store proposer rewards for error problems
+            'problem_rewards': [],   # Store proposer rewards for problem problems
         }
         self.type_counters = {
             'input_types': defaultdict(create_default_dict),
@@ -283,7 +287,17 @@ class DatasetManager:
             'output_types': threading.RLock(),
             'error_types': threading.RLock(),
         }
-
+    # Methods to store and retrieve rewards
+    def add_reward_batch(self, dataset_key: str, rewards: List[float], global_step: int):
+        reward_key = f"{dataset_key}_rewards"
+        with self.locks[reward_key]:
+            self.datasets[reward_key].extend(rewards)
+            
+    def get_rewards_with_steps(self, dataset_key: str) -> List[Tuple[float, int]]:
+        reward_key = f"{dataset_key}_rewards"
+        steps_key = f"{dataset_key}_steps"
+        return list(zip(self.datasets[reward_key], self.datasets[steps_key]))
+    
     def update_seed(self, entries):
         with self.locks['seed']:
             existing = {json.dumps(d, sort_keys=True): True for d in self.datasets['seed']}
@@ -646,6 +660,37 @@ class CodeIORayPPOTrainer(ReasonRLRayPPOTrainer):
             weights = [1.0] * len(io_data)
         elif self.config.azr.gen_data_probabilities_strategy == 'step':
             weights = [w + 1 for w in ray.get(self.dataset_manager.get_steps_dataset.remote(dataset_key))]
+        elif self.config.azr.gen_data_probabilities_strategy == 'reward_adaptive':
+            if not self.config.azr.reward_adaptive_sampling.enabled:
+                weights = [1.0] * len(io_data)
+            else:
+                # Get rewards and steps for adaptive sampling
+                rewards_with_steps = ray.get(self.dataset_manager.get_rewards_with_steps.remote(dataset_key))
+                
+                if not rewards_with_steps:
+                    weights = [1.0] * len(io_data)
+                else:
+                    rewards, steps = zip(*rewards_with_steps)
+                    current_step = self.global_steps
+                    
+                    # Calculate adaptive weights
+                    adaptive_weights = []
+                    for reward, step in zip(rewards, steps):
+                        # Reward component (higher reward = higher weight)
+                        reward_component = max(reward, self.config.azr.reward_adaptive_sampling.min_reward_threshold)
+                        
+                        # Recency component (newer = higher weight)
+                        age = current_step - step
+                        recency_component = self.config.azr.reward_adaptive_sampling.reward_decay_factor ** age
+                        
+                        # Combined weight
+                        combined_weight = (
+                            self.config.azr.reward_adaptive_sampling.reward_weight * reward_component +
+                            self.config.azr.reward_adaptive_sampling.recency_weight * recency_component
+                        )
+                        adaptive_weights.append(combined_weight)
+                    
+                    weights = adaptive_weights
         else:
             raise ValueError(f"Unknown strategy: {self.config.azr.gen_data_probabilities_strategy}")
 
@@ -873,7 +918,19 @@ class CodeIORayPPOTrainer(ReasonRLRayPPOTrainer):
                 # get avg_program lines
                 avg_program_lines = sum(len(program['snippet'].split('\n')) for program in valid_programs) / len(valid_programs) if valid_programs else 0
                 train_metrics[f'{problem_type}/avg_program_lines'] = avg_program_lines
-
+            # After computing rewards, store them in DatasetManager
+            if valid_programs:
+                # Extract proposer rewards (rewards of the problems that generated these programs)
+                proposer_rewards = []
+                for program in valid_programs:
+                    # Get the reward of the original problem that generated this program
+                    proposer_reward = program.get('proposer_reward', 0.0)  # Default to 0 if not available
+                    proposer_rewards.append(proposer_reward)
+                
+                # Store rewards in DatasetManager
+                ray.get(self.dataset_manager.add_reward_batch.remote(
+                    dataset_key, proposer_rewards, self.global_steps
+                ))
             # Log new programs if available
             if valid_programs and self.config.azr.random_print_max_programs > 0:
                 PrettyPrinter.section_header(f"New {problem_type} Programs")

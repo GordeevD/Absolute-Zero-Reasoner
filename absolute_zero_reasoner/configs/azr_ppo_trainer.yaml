@@ -195,7 +195,13 @@ azr:
     - code_o
     - code_f
   pred_data_mix_strategy: "max_new"  # [uniform_total, max_new, half_new, step]
-  gen_data_probabilities_strategy: "uniform"  # [uniform, step]
+  gen_data_probabilities_strategy: "reward_adaptive"  # [uniform, step, reward_adaptive]
+  reward_adaptive_sampling:
+    enabled: true
+    reward_weight: 0.7      # Weight for reward-based sampling
+    recency_weight: 0.3     # Weight for recency-based sampling
+    min_reward_threshold: 0.1  # Minimum reward to consider
+    reward_decay_factor: 0.95  # Decay factor for older rewards
   past_epoch_window: ${azr.data_selection_strategy.update_iteration}
   seed_dataset: null
   error_seed_dataset: null

@@ -15,7 +15,7 @@ python -m absolute_zero_reasoner.main_azr_ppo \
     algorithm.adv_estimator=reinforce_plus_plus \
     data.train_files=data/code_reason/test_answer.parquet \
     data.val_files=data/code_reason/test_answer.parquet \
-    data.train_batch_size=64 \
+    data.train_batch_size=32 \
     data.val_batch_size=1312 \
     data.max_prompt_length=6144 \
     data.max_validation_prompt_length=6144 \
@@ -93,7 +93,12 @@ python -m absolute_zero_reasoner.main_azr_ppo \
     azr.data_selection_strategy.max_programs=16384 \
     azr.data_selection_strategy.batched_estimate=False \
     azr.reward.generation_reward_config.intrinsic_combine_method=sum \
-    azr.gen_data_probabilities_strategy=uniform \
+    azr.gen_data_probabilities_strategy=reward_adaptive \
+    azr.reward_adaptive_sampling.enabled=True \
+    azr.reward_adaptive_sampling.reward_weight=0.7 \
+    azr.reward_adaptive_sampling.recency_weight=0.3 \
+    azr.reward_adaptive_sampling.min_reward_threshold=0.1 \
+    azr.reward_adaptive_sampling.reward_decay_factor=0.95 \
     trainer.resume_mode=auto \
     azr.data_selection_strategy.composite_start_step=-1 \
     azr.data_selection_strategy.composite_chance=0.0 \
