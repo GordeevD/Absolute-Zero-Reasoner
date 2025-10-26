@@ -53,8 +53,12 @@ def get_gen_code_io_data(
         if not include_references and problem_type != 'code_f':
             chosen_references = []
         else:
+        #    chosen_references = random.choice(io_data, size=min(io_n, len(io_data)), replace=False, p=probabilities)
+             # Add check to ensure probabilities matches io_data size
+            if len(probabilities) != len(io_data):
+                probabilities = [1.0 / len(io_data)] * len(io_data)
             chosen_references = random.choice(io_data, size=min(io_n, len(io_data)), replace=False, p=probabilities)
-        # composite functions is not used for code_f problem type
+       # composite functions is not used for code_f problem type
         if problem_type != 'code_f' and composite_function_n_max > 0 and enable_composite_function and random.random() <= composite_chance and len(chosen_references) > composite_function_n_max:
             # TODO: we only allow composite to sample from code snippets without composite functions
             io_without_composite_function_indices = [i for i in range(len(io_data)) if not io_data[i]['composite_functions']]
@@ -64,6 +68,9 @@ def get_gen_code_io_data(
             io_without_composite_function_probabilities = [w / sum(io_without_composite_function_weights) for w in io_without_composite_function_weights]
             # number of composite functions to sample is either fixed or random
             composite_function_n = composite_function_n_min if composite_function_n_min == composite_function_n_max else random.randint(composite_function_n_min, composite_function_n_max)
+            # Add check to ensure sizes match
+            if len(io_without_composite_function_data) != len(io_without_composite_function_probabilities):
+                io_without_composite_function_probabilities = [1.0 / len(io_without_composite_function_data)] * len(io_without_composite_function_data)
             composite_functions = random.choice(io_without_composite_function_data, size=composite_function_n, replace=False, p=io_without_composite_function_probabilities)
             for i, composite_function in enumerate(composite_functions):
                 # TODO: need to also replace recursively called composite functions, ignore functions that have f as the last letter, only for function call f()
